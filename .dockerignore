@@ -1,0 +1,13 @@
+**/.git
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/.env
+**/.env.*
+!**/.env.example
+**/publish
+**/*.md
+!README.md
+**/Dockerfile*
+**/.dockerignore
