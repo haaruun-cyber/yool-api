@@ -15,10 +15,16 @@ services:
         value: http://+:8080
       - key: CLIENT_URL
         sync: false
+      - key: API_PUBLIC_URL
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
       - key: ConnectionStrings__Neon
         sync: false
       - key: GOOGLE_CLIENT_ID
@@ -27,6 +33,30 @@ services:
         sync: false
       - key: GOOGLE_CALLBACK_URL
         sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: WAAFIPAY_API_KEY
+        sync: false
+      - key: WAAFIPAY_API_USER_ID
+        sync: false
+      - key: WAAFIPAY_MERCHANT_UID
+        sync: false
+      - key: WAAFIPAY_WEBHOOK_SECRET
+        sync: false
+      - key: WAAFIPAY_CURRENCY
+        value: USD
+      - key: WAAFIPAY_PRO_AMOUNT
+        value: "12"
+      - key: WAAFIPAY_TEAM_AMOUNT
+        value: "24"
       - key: EMAIL_HOST
         sync: false
       - key: EMAIL_PORT

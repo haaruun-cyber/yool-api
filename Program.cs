@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.IdentityModel.Tokens;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
@@ -93,6 +94,7 @@ builder.Services.AddCors(options =>
 var jwtSecret = builder.Configuration["JWT_SECRET"] ?? "change-this-development-secret";
 var googleClientId = builder.Configuration["GOOGLE_CLIENT_ID"];
 var googleClientSecret = builder.Configuration["GOOGLE_CLIENT_SECRET"];
+var googleCallbackUrl = builder.Configuration["GOOGLE_CALLBACK_URL"]?.Trim();
 
 var authBuilder = builder.Services.AddAuthentication(options =>
 {
@@ -138,10 +140,26 @@ if (!string.IsNullOrWhiteSpace(googleClientId) && !string.IsNullOrWhiteSpace(goo
         options.ClientId = googleClientId;
         options.ClientSecret = googleClientSecret;
         options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-        options.CallbackPath = "/api/auth/google/callback";
+        options.CallbackPath = Uri.TryCreate(googleCallbackUrl, UriKind.Absolute, out var callbackUri)
+            ? callbackUri.AbsolutePath
+            : "/api/auth/google/callback";
         options.Scope.Add("email");
         options.Scope.Add("profile");
         options.SaveTokens = true;
+        options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+
+        // Must match Google Cloud Console "Authorized redirect URIs" exactly (same as Node GOOGLE_CALLBACK_URL).
+        if (!string.IsNullOrWhiteSpace(googleCallbackUrl))
+        {
+            var forcedRedirectUri = googleCallbackUrl.TrimEnd('/');
+            options.Events.OnRedirectToAuthorizationEndpoint = context =>
+            {
+                context.RedirectUri = OAuthHelpers.ReplaceRedirectUri(context.RedirectUri, forcedRedirectUri);
+                context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            };
+        }
     });
 }
 
@@ -152,7 +170,9 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
 });
 
 var app = builder.Build();
@@ -186,6 +206,35 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+static class OAuthHelpers
+{
+    public static string ReplaceRedirectUri(string authorizeUrl, string redirectUri)
+    {
+        var uri = new Uri(authorizeUrl);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        var pairs = new List<KeyValuePair<string, string?>>();
+        var replaced = false;
+        foreach (var (key, value) in query)
+        {
+            if (string.Equals(key, "redirect_uri", StringComparison.OrdinalIgnoreCase))
+            {
+                pairs.Add(new("redirect_uri", redirectUri));
+                replaced = true;
+            }
+            else
+            {
+                foreach (var v in value)
+                    pairs.Add(new(key, v));
+            }
+        }
+
+        if (!replaced)
+            pairs.Add(new("redirect_uri", redirectUri));
+
+        return uri.GetLeftPart(UriPartial.Path) + QueryString.Create(pairs).ToUriComponent();
+    }
+}
 
 public sealed class ObjectIdJsonConverter : JsonConverter<ObjectId>
 {

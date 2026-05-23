@@ -188,13 +188,18 @@ public sealed class AuthController(MongoDbContext db, JwtService jwt, EmailServi
     private string ClientBase() => (config["CLIENT_URL"] ?? "http://localhost:3000").TrimEnd('/');
 
     [HttpGet("google")]
-    public IActionResult GoogleLogin()
+    public async Task GoogleLogin()
     {
         if (!GoogleEnabled())
-            return StatusCode(501, new { message = "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL." });
+        {
+            Response.StatusCode = StatusCodes.Status501NotImplemented;
+            await Response.WriteAsJsonAsync(new { message = "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL." });
+            return;
+        }
 
+        // ApiController turns Challenge() into an empty 200 — must invoke the handler directly.
         var props = new AuthenticationProperties { RedirectUri = "/api/auth/google/complete" };
-        return Challenge(props, GoogleDefaults.AuthenticationScheme);
+        await HttpContext.ChallengeAsync(GoogleDefaults.AuthenticationScheme, props);
     }
 
     [HttpGet("google/complete")]
