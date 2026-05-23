@@ -7,23 +7,18 @@ namespace aspbackend.Data;
 
 public sealed class MongoDbContext
 {
-    private readonly NpgsqlDataSource _dataSource;
+    private readonly string? _connection;
+    private NpgsqlDataSource? _dataSource;
     private readonly JsonSerializerOptions _jsonOptions;
     private bool _schemaReady;
     private readonly SemaphoreSlim _schemaLock = new(1, 1);
 
     public MongoDbContext(IConfiguration configuration)
     {
-        var connection = configuration.GetConnectionString("Neon")
+        _connection = configuration.GetConnectionString("Neon")
             ?? configuration["NEON_DATABASE_URL"]
-            ?? configuration["DATABASE_URL"]
-            ?? throw new InvalidOperationException("Database connection missing. Set ConnectionStrings:Neon, NEON_DATABASE_URL, or DATABASE_URL.");
+            ?? configuration["DATABASE_URL"];
 
-        connection = NormalizeConnectionString(connection);
-        var sourceBuilder = new NpgsqlDataSourceBuilder(connection);
-        sourceBuilder.ConnectionStringBuilder.Timeout = 30;
-        sourceBuilder.ConnectionStringBuilder.CommandTimeout = 60;
-        _dataSource = sourceBuilder.Build();
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -32,6 +27,8 @@ public sealed class MongoDbContext
         _jsonOptions.Converters.Add(new ObjectIdJsonConverter());
         _jsonOptions.Converters.Add(new BsonValueJsonConverter());
     }
+
+    public bool HasConnectionString => !string.IsNullOrWhiteSpace(_connection);
 
     public Task<List<T>> AllAsync<T>(string table) => QueryAsync<T>(table, null);
 
@@ -44,7 +41,7 @@ public sealed class MongoDbContext
     public async Task InsertAsync<T>(string table, ObjectId id, T value)
     {
         await EnsureSchemaAsync();
-        await using var cmd = _dataSource.CreateCommand($"""
+        await using var cmd = DataSource.CreateCommand($"""
             insert into {table} (id, data, created_at, updated_at)
             values ($1, $2, now(), now())
             on conflict (id) do update set data = excluded.data, updated_at = now()
@@ -59,7 +56,7 @@ public sealed class MongoDbContext
     public async Task DeleteAsync(string table, ObjectId id)
     {
         await EnsureSchemaAsync();
-        await using var cmd = _dataSource.CreateCommand($"delete from {table} where id = $1");
+        await using var cmd = DataSource.CreateCommand($"delete from {table} where id = $1");
         cmd.Parameters.AddWithValue(id.ToString());
         await cmd.ExecuteNonQueryAsync();
     }
@@ -78,7 +75,7 @@ public sealed class MongoDbContext
     {
         await EnsureSchemaAsync();
         var sql = id is null ? $"select data from {table}" : $"select data from {table} where id = $1";
-        await using var cmd = _dataSource.CreateCommand(sql);
+        await using var cmd = DataSource.CreateCommand(sql);
         if (id is not null) cmd.Parameters.AddWithValue(id);
         await using var reader = await cmd.ExecuteReaderAsync();
         var items = new List<T>();
@@ -104,7 +101,7 @@ public sealed class MongoDbContext
                 "notifications", "subscriptions", "analytics_daily", "ai_history"
             };
 
-            await using var conn = await _dataSource.OpenConnectionAsync();
+            await using var conn = await DataSource.OpenConnectionAsync();
             foreach (var table in tables)
             {
                 await using var cmd = new NpgsqlCommand($"""
@@ -132,5 +129,21 @@ public sealed class MongoDbContext
         if (connection.Contains("Channel Binding=Require", StringComparison.OrdinalIgnoreCase))
             connection = connection.Replace("Channel Binding=Require", "Channel Binding=Prefer", StringComparison.OrdinalIgnoreCase);
         return connection;
+    }
+
+    private NpgsqlDataSource DataSource
+    {
+        get
+        {
+            if (_dataSource is not null) return _dataSource;
+            if (string.IsNullOrWhiteSpace(_connection))
+                throw new InvalidOperationException("Database connection missing. Set ConnectionStrings__Neon in Render.");
+
+            var sourceBuilder = new NpgsqlDataSourceBuilder(NormalizeConnectionString(_connection));
+            sourceBuilder.ConnectionStringBuilder.Timeout = 30;
+            sourceBuilder.ConnectionStringBuilder.CommandTimeout = 60;
+            _dataSource = sourceBuilder.Build();
+            return _dataSource;
+        }
     }
 }

@@ -177,6 +177,24 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var app = builder.Build();
 
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var feature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+        var ex = feature?.Error;
+        var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("GlobalException");
+        if (ex is not null) logger.LogError(ex, "Unhandled error for {Path}", context.Request.Path);
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = ex?.Message ?? "Server error",
+            type = ex?.GetType().Name
+        });
+    });
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -188,6 +206,17 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", uptime = Environment.TickCount64 / 1000d }));
+app.MapGet("/diag/config", (IConfiguration config, MongoDbContext db) => Results.Ok(new
+{
+    databaseConfigured = db.HasConnectionString,
+    clientUrl = config["CLIENT_URL"],
+    apiPublicUrl = config["API_PUBLIC_URL"],
+    googleClientConfigured = !string.IsNullOrWhiteSpace(config["GOOGLE_CLIENT_ID"]),
+    googleSecretConfigured = !string.IsNullOrWhiteSpace(config["GOOGLE_CLIENT_SECRET"]),
+    googleCallbackUrl = config["GOOGLE_CALLBACK_URL"],
+    jwtConfigured = !string.IsNullOrWhiteSpace(config["JWT_SECRET"]),
+    refreshJwtConfigured = !string.IsNullOrWhiteSpace(config["JWT_REFRESH_SECRET"])
+}));
 app.MapControllers();
 app.MapHub<CollaborationHub>("/hubs/collaboration");
 
